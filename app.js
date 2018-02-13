@@ -26,18 +26,26 @@ var
   current_database,
   current_table,
   editor,
-  resp_field_types;
+  resp_field_types,
+  prevent_table_restore;
 
 $(function() {
   if (window.location.hash) {
-    db_host = window.location.hash.replace('#', '');
+    var hash = window.location.hash;
+    if (hash.charAt(0) == '#') {
+      hash = hash.substring(1);
+    }
+    var hash_parts = hash.split(/\#/g, 4);
+    db_host = hash_parts[0];
+    if (hash_parts.length == 4) {
+      current_database = hash_parts[1];
+      current_table = hash_parts[2];
+      var external_where = decodeURIComponent(hash_parts[3]);
+    }
   } else {
     db_host = prompt('Host:', 'http://127.0.0.1:8123/');
+    window.location.hash = db_host;
   }
-
-  // document.title = db_host + ' - ' + document.title;
-  window.location.hash = db_host;
-  reloadDatabases();
 
   $('#query').keydown(function(ev) {
     if ((ev.metaKey || ev.ctrlKey) && ev.keyCode == 13 /* Cmd+Enter */) {
@@ -70,6 +78,20 @@ $(function() {
       }
     }
   })
+
+  if (external_where) {
+    prevent_table_restore = true;
+  }
+
+  reloadDatabases();
+  if (external_where) {
+    var filter_q = 'SELECT * FROM ' + current_database + '.' + current_table + ' WHERE ' + external_where + ' LIMIT 1000';
+    query(filter_q, function(data) {
+      drawResponse(data);
+      $('#params').html(htmlspecialchars(filter_q));
+      $('#params').show();
+    });
+  }
 })
 
 function drawResponse(data, reuse_grid) {
@@ -138,7 +160,7 @@ function filtersEmpty() {
   return true;
 }
 
-function applyFilters() {
+function applyFilters(external_where) {
   var defs = grid_options.columnDefs;
   var where = ['1=1'];
 
@@ -176,16 +198,16 @@ function applyFilters() {
         }
       case "equals":
         if (typ.indexOf('Int') < 0) {
-          where.push(field + " = '" + esc_filter + "'");
+          where.push(field + "='" + esc_filter + "'");
         } else {
-          where.push(field + " = " + parseInt(filt.filterText));
+          where.push(field + "=" + parseInt(filt.filterText));
         }
         break;
       case "notEqual":
         if (typ.indexOf('Int') < 0) {
-          where.push(field + " <> '" + esc_filter + "'");
+          where.push(field + "<>'" + esc_filter + "'");
         } else {
-          where.push(field + " <> " + parseInt(filt.filterText));
+          where.push(field + "<>" + parseInt(filt.filterText));
         }
         break;
       default:
@@ -202,13 +224,17 @@ function applyFilters() {
     where = where.slice(1);
   }
 
+  var where_part = where.join(' AND ');
+
+  window.location.hash = db_host + '#' + current_database + '#' + current_table + '#' + encodeURIComponent(where_part);
+
   var q = 'SELECT * FROM ' + current_database + "." + current_table +
-    ' WHERE ' + where.join(' AND ') +
+    ' WHERE ' + where_part +
     ' LIMIT 1000';
   query(q, function(data) {
     drawResponse(data, true);
 
-    $('#params').html(htmlspecialchars(where.join(' AND ')));
+    $('#params').html(htmlspecialchars(q));
     $('#params').show();
 
     var defs = grid_options.columnDefs;
@@ -351,9 +377,13 @@ function reloadDatabases() {
     }
 
     var default_database = "default";
-    var saved_database = localStorage.getItem("current_database");
-    if (saved_database) {
-      default_database = saved_database;
+    if (current_database) {
+      default_database = current_database;
+    } else {
+      var saved_database = localStorage.getItem("current_database");
+      if (saved_database) {
+        default_database = saved_database;
+      }
     }
     
     var lst = ['<option value="">Select database...</option>'];
@@ -397,13 +427,11 @@ function drawTables(tables, first) {
     
     var q = 'SELECT * FROM ' + current_database + "." + name + ' LIMIT 100';
 
-    if ($('#query').val() == '') {
-      query(q, function(data) {
-        drawResponse(data);
-        $('#filter-btn').attr('disabled', false);
-      });
-      $('#query').attr('placeholder', q);
-    }
+    query(q, function(data) {
+      drawResponse(data);
+      $('#filter-btn').attr('disabled', false);
+    });
+    $('#query').attr('placeholder', q);
 
     query("SELECT\
     any(engine), sum(rows), sum(bytes)  \
@@ -430,7 +458,7 @@ function drawTables(tables, first) {
     return false;
   });
 
-  if (first) {
+  if (first && !prevent_table_restore) {
     selectDefaultTable();
   }
 }

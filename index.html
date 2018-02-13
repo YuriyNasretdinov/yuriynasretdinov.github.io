@@ -4,6 +4,7 @@
 	<link href="css/bootstrap.css" rel="stylesheet" media="screen">
 	<script src="js/ag-grid.min.js"></script>
 	<script src="js/ace-min/ace.js"></script>
+	<script src="js/ace-min/ext-language_tools.js"></script>
 	<script type="text/javascript" src="jquery.js"></script>
 	<script type="text/javascript" src="js/bootstrap.js"></script>
 	<script type="text/javascript" src="app.js"></script>
@@ -68,7 +69,7 @@
 	}
 	</style>
 </head>
-<body>
+<body onbeforeunload="saveLastQuery()">
 <div style="width: 200px; max-width: 200px; height: 100vh; padding: 0px; margin: 0px; position: absolute; top: 0px; left: 0px; flex-direction: column; display: flex;">
 	<div>
 		<select id="database" onchange="selectDatabase(this.value)"></select>
@@ -103,8 +104,12 @@
 			</div>
 			<div>
 				<span id="executing" style="visibility: hidden;">executing...</span>
-				<button id="execute-btn" class="btn btn-mini btn-primary pull-right" onclick="submitQuery()">
+				<span id="params" style="display: none;"></span>
+				<button id="execute-btn" class="btn btn-mini btn-primary pull-right" onclick="submitQuery()" style="margin: 3px;">
 					<b>Execute</b>
+				</button>
+				<button id="filter-btn" class="btn btn-mini btn-primary pull-right" onclick="applyFilters()" style="margin: 3px;">
+					<b>Apply filters</b>
 				</button>
 			</div>
 		</td></tr>
@@ -114,7 +119,11 @@
 			</div>
 		</td></tr>
 		<tr height="40"><td class="status" style="border-bottom: 0px;">
-			<div>Query execution time: <span id="query-ms">0</span> ms; Affected rows: <span id="affected-rows">0</span></div>
+			<div>
+				Query execution time: <span id="query-ms">0</span> ms;
+				Affected rows: <span id="affected-rows">0</span>; 
+				Result rows: <span id="result-rows">0</span>
+			</div>
 		</td></tr>
 	</table>
 </div>

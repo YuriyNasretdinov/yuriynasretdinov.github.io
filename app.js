@@ -1,12 +1,32 @@
 function submitQuery() {
+  $('#params').hide();
   document.getElementById('executing').style.visibility = '';
-  query(editor.getValue(), function(data) {
+
+  var q = editor.getValue();
+  localStorage.setItem('last_query', q);
+  query(editor.getSelectedText() || q, function(data) {
     document.getElementById('executing').style.visibility = 'hidden';
+    $('#filter-btn').attr('disabled', true);
     drawResponse(data);
   });
 }
 
-var ws, global_tables, grid, db_host, current_database, editor;
+function saveLastQuery() {
+  try {
+    localStorage.setItem('last_query', editor.getValue());
+  } catch (e) {}
+}
+
+var
+  ws,
+  global_tables,
+  grid,
+  grid_options,
+  db_host,
+  current_database,
+  current_table,
+  editor,
+  resp_field_types;
 
 $(function() {
   if (window.location.hash) {
@@ -15,7 +35,7 @@ $(function() {
     db_host = prompt('Host:', 'http://127.0.0.1:8123/');
   }
 
-  document.title = db_host + ' - ' + document.title;
+  // document.title = db_host + ' - ' + document.title;
   window.location.hash = db_host;
   reloadDatabases();
 
@@ -28,8 +48,19 @@ $(function() {
 
   $('#search').bind({keyup: filterTables, mouseup: filterTables});
 
+  var last_q = localStorage.getItem('last_query');
+  
+  var langTools = ace.require("ace/ext/language_tools");
   editor = ace.edit("query");
+  if (last_q) {
+    editor.setValue(last_q);
+  }
   editor.session.setMode("ace/mode/mysql");
+  editor.setOptions({
+    enableBasicAutocompletion: true,
+    enableSnippets: true,
+    enableLiveAutocompletion: true
+  });
 
   $('#query-result').on('dblclick', function(e) {
     var targ = e.target;
@@ -41,9 +72,11 @@ $(function() {
   })
 })
 
-function drawResponse(data) {
+function drawResponse(data, reuse_grid) {
+  $('#params').hide();
   $('#query-ms').html(Math.floor(data['time_ns'] / 1000000))
   $('#affected-rows').html(humanRowsCount(data['affected_rows']))
+  $('#result-rows').html(data.rows && data.rows.length)
 
   if (grid) {
     try {
@@ -56,11 +89,6 @@ function drawResponse(data) {
 
   if (data.err) {
     $('#query-result').html('<b>Error:</b> ' + data.err);
-    return;
-  }
-
-  if (!data.fields.length) {
-    $('#query-result').html('<i>Query executed successfully. Got empty resultset</i>');
     return;
   }
 
@@ -86,11 +114,146 @@ function drawResponse(data) {
     })
   }
 
-  grid = new agGrid.Grid(document.querySelector('#query-result'), {
+  grid_options = {
     columnDefs: fullFields,
     rowData: fullRows,
     enableColResize: true,
     singleClickEdit: true,
+    enableFilter: true,
+    enableSorting: true,
+  };
+  grid = new agGrid.Grid(document.querySelector('#query-result'), grid_options);
+}
+
+function filtersEmpty() {
+  var defs = grid_options.columnDefs;
+  for (var i = 0; i < defs.length; i++) {
+    var def = defs[i];
+    var field = def.field;
+    var filt = grid_options.api.getFilterInstance(field);
+    if (filt.filterText) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function applyFilters() {
+  var defs = grid_options.columnDefs;
+  var where = ['1=1'];
+
+  var old_filters = {};
+
+  for (var i = 0; i < defs.length; i++) {
+    var def = defs[i];
+    var field = def.field;
+    var filt = grid_options.api.getFilterInstance(field);
+    if (!filt.filterText) {
+      continue;
+    }
+
+    typ = resp_field_types[field] || '';
+    var esc_filter = mysql_real_escape_string(filt.filterText);
+
+    switch (filt.filter) {
+      case "contains":
+        if (typ.indexOf('Int') < 0) {
+          where.push(field + " LIKE '%" + esc_filter + "%'");
+        }
+        break;
+      case "notContains":
+        if (typ.indexOf('Int') < 0) {
+          where.push(field + " NOT LIKE '%" + esc_filter + "%'");
+        }
+        break;
+      case "startsWith":
+        if (typ.indexOf('Int') < 0) {
+          where.push(field + " LIKE '" + esc_filter + "%'");
+        }
+      case "endsWith":
+        if (typ.indexOf('Int') < 0) {
+          where.push(field + " LIKE '%" + esc_filter + "'");
+        }
+      case "equals":
+        if (typ.indexOf('Int') < 0) {
+          where.push(field + " = '" + esc_filter + "'");
+        } else {
+          where.push(field + " = " + parseInt(filt.filterText));
+        }
+        break;
+      case "notEqual":
+        if (typ.indexOf('Int') < 0) {
+          where.push(field + " <> '" + esc_filter + "'");
+        } else {
+          where.push(field + " <> " + parseInt(filt.filterText));
+        }
+        break;
+      default:
+        console.log(field, "type=" + filt.filter, "text=" + filt.filterText);
+    }
+
+    old_filters[field] = {
+      filter: filt.filter,
+      filterText: filt.filterText,
+    };
+  }
+
+  if (where.length > 1) {
+    where = where.slice(1);
+  }
+
+  var q = 'SELECT * FROM ' + current_database + "." + current_table +
+    ' WHERE ' + where.join(' AND ') +
+    ' LIMIT 1000';
+  query(q, function(data) {
+    drawResponse(data, true);
+
+    $('#params').html(htmlspecialchars(where.join(' AND ')));
+    $('#params').show();
+
+    var defs = grid_options.columnDefs;
+    for (var i = 0; i < defs.length; i++) {
+      var def = defs[i];
+      var field = def.field;
+      var old_filt = old_filters[field];
+      if (!old_filt) {
+        continue;
+      }
+      var filt = grid_options.api.getFilterInstance(field);
+      filt.filter = old_filt.filter;
+      filt.filterText = old_filt.filterText;
+    }
+    grid_options.api.onFilterChanged();
+  });
+  $('#query').attr('placeholder', q);
+}
+
+// https://stackoverflow.com/questions/7744912/making-a-javascript-string-sql-friendly
+function mysql_real_escape_string (str) {
+  if (typeof str != 'string')
+      return str;
+
+  return str.replace(/[\0\x08\x09\x1a\n\r"'\\\%]/g, function (char) {
+      switch (char) {
+          case "\0":
+              return "\\0";
+          case "\x08":
+              return "\\b";
+          case "\x09":
+              return "\\t";
+          case "\x1a":
+              return "\\z";
+          case "\n":
+              return "\\n";
+          case "\r":
+              return "\\r";
+          case "\"":
+          case "'":
+          case "\\":
+          case "%":
+              return "\\"+char; // prepends a backslash to backslash, percent,
+                                // and double/single quotes
+      }
   });
 }
 
@@ -105,7 +268,12 @@ function query(str, callback) {
         if (xhr.status === 200) {
           var res = JSON.parse(xhr.responseText);
           var fields = [];
-          for (var i = 0; i < res.meta.length; i++) fields.push(res.meta[i].name);
+          resp_field_types = {};
+          for (var i = 0; i < res.meta.length; i++) {
+            var m = res.meta[i];
+            resp_field_types[m.name] = m.type;
+            fields.push(m.name);
+          }
           callback({
             fields: fields,
             rows: res.data,
@@ -118,6 +286,8 @@ function query(str, callback) {
   xhr.onerror = function() {
     callback({err: 'got status ' + xhr.status + ', error text: ' + xhr.responseText})
   }
+
+  str = str.replace(/\;\s*$/, '');
 
   if ((str.indexOf('SELECT') >= 0 || str.indexOf('select') >= 0) && str.indexOf('limit') < 0 && str.indexOf('LIMIT') < 0) {
     str += "\nLIMIT 1000";
@@ -138,7 +308,7 @@ function drawCopyEl(el, value) {
   el.focus();
 
   $(el).height(0);
-  var height = Math.max(100, Math.min(el.scrollHeight, 500));
+  var height = Math.max(20, Math.min(el.scrollHeight, 500));
   $(el).height(height);
   if (height > 100) {
     el.style.top = (off.top - height + 100) + 'px';
@@ -155,8 +325,9 @@ function drawCopyEl(el, value) {
   }
 }
 
-function selectDatabase(val) {
+function selectDatabase(val, first) {
   current_database = val;
+  localStorage.setItem('current_database', current_database);
   query("SHOW TABLES FROM " + current_database, function(data) {
     if (data.err) {
       alert(data.err);
@@ -165,7 +336,7 @@ function selectDatabase(val) {
 
     global_tables = [];
     for (var i = 0; i < data.rows.length; i++) global_tables[i] = data.rows[i][0];
-    drawTables(global_tables);
+    drawTables(global_tables, first);
 
     $('#info').html('');
     $('#search').val('').focus();
@@ -179,21 +350,20 @@ function reloadDatabases() {
       return;
     }
 
-    var init_default = false;
+    var default_database = "default";
+    var saved_database = localStorage.getItem("current_database");
+    if (saved_database) {
+      default_database = saved_database;
+    }
+    
     var lst = ['<option value="">Select database...</option>'];
     for (var i = 0; i < data.rows.length; i++) {
       var name = data.rows[i][0];
-      if (name == "default" && !current_database) {
-        init_default = true;
-      }
-      lst.push('<option value="' + htmlspecialchars(name) + '"' + (init_default && name == "default" ? ' selected="selected"' : '') + '>' + htmlspecialchars(name) + '</option>');
+      lst.push('<option value="' + htmlspecialchars(name) + '"' + (name == default_database ? ' selected="selected"' : '') + '>' + htmlspecialchars(name) + '</option>');
     }
 
     $('#database').html(lst.join("\n"));
-
-    if (init_default) {
-      selectDatabase("default");
-    }
+    selectDatabase(default_database, true);
   });
 }
 
@@ -210,7 +380,7 @@ function filterTables() {
   drawTables(tables);
 }
 
-function drawTables(tables) {
+function drawTables(tables, first) {
   var result = ['<ul class="nav nav-list"><li class="nav-header">Tables</li>'];
   for (var i = 0; i < tables.length; i++) {
     var name = htmlspecialchars(tables[i]);
@@ -219,6 +389,8 @@ function drawTables(tables) {
   result.push('</ul>');
   $('#tables').html(result.join("\n")).find('.table_name').bind('click', function() {
     var name = $(this).data('name');
+    current_table = name;
+    localStorage.setItem('current_table', current_table);
     var className = 'active';
     $('#tables').find('.' + className).removeClass(className);
     $(this.parentNode).addClass(className);
@@ -226,7 +398,10 @@ function drawTables(tables) {
     var q = 'SELECT * FROM ' + current_database + "." + name + ' LIMIT 100';
 
     if ($('#query').val() == '') {
-      query(q, drawResponse);
+      query(q, function(data) {
+        drawResponse(data);
+        $('#filter-btn').attr('disabled', false);
+      });
       $('#query').attr('placeholder', q);
     }
 
@@ -248,18 +423,30 @@ function drawTables(tables) {
       $('#info').html(
         '<div><b>Engine:</b> ' + htmlspecialchars(row[0]) + '</div>' +
         '<div><b>Est. Rows:</b> ' + htmlspecialchars(humanRowsCount(row[1])) + '</div>' +
-        '<div><b>Size:</b> ' + humanSize(row[2]) + '</div>'
+        '<div><b>Size:</b> ' + humanSize(row[2]) + '</div>' +
+        '<div>&nbsp;</div>'
       );
     });
     return false;
   });
+
+  if (first) {
+    selectDefaultTable();
+  }
+}
+
+function selectDefaultTable() {
+  var default_table = localStorage.getItem('current_table');
+  if (!default_table) return;
+  $('#tables').find('.table_name[data-name="' + default_table + '"]').trigger('click');
 }
 
 function humanSize(bytes) {
   if (bytes < 1024) return bytes + ' bytes';
   if (bytes < 1024*1024) return Math.floor(bytes / 1024) + ' Kb';
   if (bytes < 1024*1024*1024) return Math.floor(bytes / 1024 / 1024) + ' Mb';
-  return Math.floor(bytes / 1024 / 1024 / 1024) + ' Gb';
+  if (bytes < 1024*1024*1024*1024) return Math.floor(bytes / 1024 / 1024 / 1024) + ' Gb';
+  return Math.floor(bytes / 1024 / 1024 / 1024 / 1024) + ' Tb';
 }
 
 function humanRowsCount(cnt) {
@@ -268,7 +455,7 @@ function humanRowsCount(cnt) {
     cnt /= 1000;
     suffix += 'k';
   }
-  return Math.round(cnt * 100) / 100 + suffix;
+  return Math.round(cnt * 10) / 10 + suffix;
 }
 
 function string_utf8_len(str) {

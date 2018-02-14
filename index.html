@@ -1,13 +1,13 @@
 <html>
 <head>
-	<title>Go ClickHouse admin</title>
+	<title>LightHouse</title>
 	<link href="css/bootstrap.css" rel="stylesheet" media="screen">
 	<script src="js/ag-grid.min.js"></script>
 	<script src="js/ace-min/ace.js"></script>
 	<script src="js/ace-min/ext-language_tools.js"></script>
 	<script type="text/javascript" src="jquery.js"></script>
 	<script type="text/javascript" src="js/bootstrap.js"></script>
-	<script type="text/javascript" src="app.js?v1"></script>
+	<script type="text/javascript" src="app.js?v2"></script>
 	<style type="text/css">
 	body {
 		overflow: hidden;
@@ -31,10 +31,17 @@
 		border-bottom: 1px gray solid;
 	}
 
-	#query-result {
+	#query-result, #content-query-result {
 		height: 100%;
 		width: calc(100vw - 220px);
 		overflow: auto;
+	}
+
+	#params, #content-params {
+		margin-left: 10px;
+		color: gray;
+		font-family: Menlo, monospace;
+		font-size: 12px;
 	}
 
 	#tables {
@@ -52,7 +59,7 @@
 		cursor: default;
 	}
 
-	#query-result td, #query-result th {
+	#query-result td, #query-result th, #content-query-result td, #content-query-result th {
 		font-size: 0.8em;
 	}
 
@@ -66,6 +73,10 @@
 
 	.status {
 		background-color: #f5f5f5;
+	}
+
+	.full {
+		height: calc(100vh - 50px);
 	}
 	</style>
 </head>
@@ -91,13 +102,50 @@
 </div>
 
 <div style="padding-left: 210px;">
-	<div class="border-bottom">
+	<div>
 		<ul class="nav nav-pills" style="margin: 0px;">
-			<li class="active"><a href="#">Query</a></li>
+			<li id="section-structure">
+				<a href="#" onclick="return selectSection('structure');">Structure</a>
+			</li>
+			<li id="section-content" class="active">
+				<a href="#" onclick="return selectSection('content');">Content</a>
+			</li>
+			<li id="section-query">
+				<a href="#" onclick="return selectSection('query');">Query</a>
+			</li>
 		</ul>
 	</div>
 
-	<table style="height: calc(100vh - 50px);" id="query-view">
+	<div class="full" style="display: none;" id="structure-view">
+		<pre id="structure"></pre>
+	</div>
+
+	<table class="full" id="content-query-view">
+		<tr height="40"><td>
+			<span id="content-loading" style="visibility: hidden;">loading...</span>
+			<span id="content-params" style="display: none;"></span>
+			<button id="filter-btn" class="btn btn-mini btn-primary pull-right" onclick="applyFilters()" style="margin: 3px;">
+				<b>Apply filters</b>
+			</button>
+			<button id="filter-btn" class="btn btn-mini btn-primary pull-right" onclick="applyFilters(true)" style="margin: 3px;">
+					<b>Apply filters &amp; sorting</b>
+				</button>
+		</td></tr>
+		<tr><td>
+			<div id="content-query-result" class="ag-theme-fresh">
+				&nbsp;
+			</div>
+		</td></tr>
+		<tr height="40"><td class="status" style="border-bottom: 0px;">
+			<div>
+				Query execution time: <span id="content-query-ms">0</span> ms;
+				Affected rows: <span id="content-affected-rows">0</span>; 
+				Result rows: <span id="content-result-rows">0</span>
+			</div>
+		</td></tr>
+	</table>
+
+	<table class="full" style="display: none;" id="query-view">
 		<tr height="95"><td>
 			<div>
 				<div style="margin-bottom: 5px; height: 250px; width: 100%;" id="query"></div>
@@ -108,12 +156,10 @@
 				<button id="execute-btn" class="btn btn-mini btn-primary pull-right" onclick="submitQuery()" style="margin: 3px;">
 					<b>Execute</b>
 				</button>
-				<button id="filter-btn" class="btn btn-mini btn-primary pull-right" onclick="applyFilters()" style="margin: 3px;">
-					<b>Apply filters</b>
-				</button>
+				
 			</div>
 		</td></tr>
-		<tr><td class="border-bottom">
+		<tr><td>
 			<div id="query-result" class="ag-theme-fresh">
 				&nbsp;
 			</div>

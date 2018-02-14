@@ -1,33 +1,17 @@
-function submitQuery() {
-  $('#params').hide();
-  document.getElementById('executing').style.visibility = '';
-
-  var q = editor.getValue();
-  localStorage.setItem('last_query', q);
-  query(editor.getSelectedText() || q, function(data) {
-    document.getElementById('executing').style.visibility = 'hidden';
-    $('#filter-btn').attr('disabled', true);
-    drawResponse(data);
-  });
-}
-
-function saveLastQuery() {
-  try {
-    localStorage.setItem('last_query', editor.getValue());
-  } catch (e) {}
-}
-
 var
   ws,
   global_tables,
   grid,
   grid_options,
+  content_grid,
+  content_grid_options,
   db_host,
   current_database,
   current_table,
   editor,
   resp_field_types,
-  prevent_table_restore;
+  prevent_table_restore,
+  pending = {};
 
 $(function() {
   if (window.location.hash) {
@@ -47,12 +31,14 @@ $(function() {
     window.location.hash = db_host;
   }
 
+  registerAltKeys();
+
   $('#query').keydown(function(ev) {
     if ((ev.metaKey || ev.ctrlKey) && ev.keyCode == 13 /* Cmd+Enter */) {
       submitQuery();
       return false;
     }
-  }).focus()
+  })
 
   $('#search').bind({keyup: filterTables, mouseup: filterTables});
 
@@ -60,17 +46,17 @@ $(function() {
   
   var langTools = ace.require("ace/ext/language_tools");
   editor = ace.edit("query");
-  if (last_q) {
-    editor.setValue(last_q);
-  }
   editor.session.setMode("ace/mode/mysql");
   editor.setOptions({
     enableBasicAutocompletion: true,
     enableSnippets: true,
     enableLiveAutocompletion: true
   });
+  if (last_q) {
+    editor.setValue(last_q, 1);
+  }
 
-  $('#query-result').on('dblclick', function(e) {
+  $('#query-result,#content-query-result').on('dblclick', function(e) {
     var targ = e.target;
     for (var k in targ) {
       if (k.indexOf('__AG_') == 0) {
@@ -84,34 +70,118 @@ $(function() {
   }
 
   reloadDatabases();
+
   if (external_where) {
     var filter_q = 'SELECT * FROM ' + current_database + '.' + current_table + ' WHERE ' + external_where + ' LIMIT 1000';
-    query(filter_q, function(data) {
-      drawResponse(data);
-      $('#params').html(htmlspecialchars(filter_q));
-      $('#params').show();
+    document.getElementById('content-loading').style.visibility = '';
+    query('content', filter_q, function(data) {
+      drawResponse(data, true);
+      document.getElementById('content-loading').style.visibility = 'hidden';
+      $('#content-params').html(htmlspecialchars(filter_q));
+      $('#content-params').show();
     });
+  } else {
+    var section = localStorage.getItem('default_section');
+    if (section) {
+      selectSection(section);
+    }
   }
 })
 
-function drawResponse(data, reuse_grid) {
-  $('#params').hide();
-  $('#query-ms').html(Math.floor(data['time_ns'] / 1000000))
-  $('#affected-rows').html(humanRowsCount(data['affected_rows']))
-  $('#result-rows').html(data.rows && data.rows.length)
+function registerAltKeys() {
+  $(document.body).on('keydown', function(e) {
+    if (e.altKey) {
+      switch (e.keyCode) {
+        case 49: // 1
+          selectSection('structure');
+          break;
+        case 50: // 2
+          selectSection('content');
+          break;
+        case 51: // 3
+          selectSection('query');
+          break;
+        default:
+          return;
+      }
 
-  if (grid) {
-    try {
-      grid.destroy();
-    } catch (e) {}
-    grid = null;
+      e.preventDefault();
+    }
+  });
+}
+
+function submitQuery() {
+  $('#content-params').hide();
+  document.getElementById('executing').style.visibility = '';
+
+  var q = editor.getValue();
+  localStorage.setItem('last_query', q);
+  query('user', editor.getSelectedText() || q, function(data) {
+    document.getElementById('executing').style.visibility = 'hidden';
+    drawResponse(data);
+  });
+}
+
+function selectSection(name) {
+  $('.nav-pills li').removeClass('active');
+  $('#section-' + name).addClass('active');
+  $('#content-query-view,#query-view,#structure-view').hide();
+
+  switch (name) {
+    case 'content':
+      $('#content-query-view').show();
+      if (content_grid_options) {
+        content_grid_options.api.doLayout();
+      }
+      break;
+    case 'query':
+      $('#query-view').show();
+      if (grid_options) {
+        grid_options.api.doLayout();
+      }
+      break;
+    case 'structure':
+      $('#structure-view').show();
+      break;
   }
 
-  document.querySelector('#query-result').innerHTML = '';
+  localStorage.setItem('default_section', name);
+  return false;
+}
+
+function saveLastQuery() {
+  try {
+    localStorage.setItem('last_query', editor.getValue());
+  } catch (e) {}
+}
+
+function drawResponse(data, is_content) {
+  var id_prefix = '#' + (is_content ? 'content-' : '');
+
+  $(id_prefix + 'params').hide();
+  $(id_prefix + 'query-ms').html(Math.floor(data['time_ns'] / 1000000))
+  $(id_prefix + 'affected-rows').html(humanRowsCount(data['affected_rows']))
+  $(id_prefix + 'result-rows').html(data.rows && data.rows.length)
+
+  var grid_key = is_content ? 'content_grid' : 'grid';
+  var grid_options_key = grid_key + '_options';
+
+  if (window[grid_key]) {
+    try {
+      window[grid_key].destroy();
+    } catch (e) {}
+    window[grid_key] = null;
+  }
+
+  document.querySelector(id_prefix + 'query-result').innerHTML = '';
 
   if (data.err) {
-    $('#query-result').html('<b>Error:</b> ' + data.err);
+    $(id_prefix + 'query-result').html('<b>Error:</b> ' + data.err);
     return;
+  }
+
+  if (is_content) {
+    resp_field_types = data.types;
   }
 
   var fields = data.fields;
@@ -130,13 +200,23 @@ function drawResponse(data, reuse_grid) {
   }
 
   for (var i = 0; i < fields.length; i++) {
-    fullFields.push({
+    var f = {
       headerName: fields[i],
       field: fields[i],
-    })
+    };
+
+    try {
+      if (data.types[fields[i]].indexOf('Int') >= 0) {
+        f.comparator = function (valueA, valueB, nodeA, nodeB, isInverted) {
+            return valueA - valueB;
+        };
+      }
+    } catch (e) {}
+
+    fullFields.push(f)
   }
 
-  grid_options = {
+  window[grid_options_key] = {
     columnDefs: fullFields,
     rowData: fullRows,
     enableColResize: true,
@@ -144,15 +224,16 @@ function drawResponse(data, reuse_grid) {
     enableFilter: true,
     enableSorting: true,
   };
-  grid = new agGrid.Grid(document.querySelector('#query-result'), grid_options);
+  var query_res_el = document.querySelector(id_prefix + 'query-result')
+  window[grid_key] = new agGrid.Grid(query_res_el, window[grid_options_key]);
 }
 
 function filtersEmpty() {
-  var defs = grid_options.columnDefs;
+  var defs = content_grid_options.columnDefs;
   for (var i = 0; i < defs.length; i++) {
     var def = defs[i];
     var field = def.field;
-    var filt = grid_options.api.getFilterInstance(field);
+    var filt = content_grid_options.api.getFilterInstance(field);
     if (filt.filterText) {
       return false;
     }
@@ -160,16 +241,14 @@ function filtersEmpty() {
   return true;
 }
 
-function applyFilters(external_where) {
-  var defs = grid_options.columnDefs;
+function getFiltersWhere() {
+  var defs = content_grid_options.columnDefs;
   var where = ['1=1'];
-
-  var old_filters = {};
 
   for (var i = 0; i < defs.length; i++) {
     var def = defs[i];
     var field = def.field;
-    var filt = grid_options.api.getFilterInstance(field);
+    var filt = content_grid_options.api.getFilterInstance(field);
     if (!filt.filterText) {
       continue;
     }
@@ -213,45 +292,50 @@ function applyFilters(external_where) {
       default:
         console.log(field, "type=" + filt.filter, "text=" + filt.filterText);
     }
-
-    old_filters[field] = {
-      filter: filt.filter,
-      filterText: filt.filterText,
-    };
   }
 
   if (where.length > 1) {
     where = where.slice(1);
   }
 
+  return where;
+}
+
+function applyFilters(with_sort) {
+  var filter_model = content_grid_options.api.getFilterModel();
+  var where = getFiltersWhere();
   var where_part = where.join(' AND ');
 
-  window.location.hash = db_host + '#' + current_database + '#' + current_table + '#' + encodeURIComponent(where_part);
+  var sort_model = content_grid_options.api.getSortModel();
+  if (with_sort) {
+    var sort_parts = [];
+    for (var i = 0; i < sort_model.length; i++) {
+      var s = sort_model[i];
+      sort_parts.push(s.colId + ' ' + s.sort.toUpperCase());
+    }
+    if (sort_parts.length > 0) {
+      where_part += ' ORDER BY ' + sort_parts.join(', ');
+    }
+  }
 
+  window.location.hash = db_host + '#' + current_database + '#' + current_table + '#' + encodeURIComponent(where_part);
   var q = 'SELECT * FROM ' + current_database + "." + current_table +
     ' WHERE ' + where_part +
     ' LIMIT 1000';
-  query(q, function(data) {
+
+  document.getElementById('content-loading').style.visibility = '';
+  $('#content-params').html(htmlspecialchars(q));
+  $('#content-params').show();
+
+  query('content', q, function(data) {
     drawResponse(data, true);
 
-    $('#params').html(htmlspecialchars(q));
-    $('#params').show();
+    $('#content-params').show();
+    content_grid_options.api.setFilterModel(filter_model);
+    content_grid_options.api.setSortModel(sort_model);
 
-    var defs = grid_options.columnDefs;
-    for (var i = 0; i < defs.length; i++) {
-      var def = defs[i];
-      var field = def.field;
-      var old_filt = old_filters[field];
-      if (!old_filt) {
-        continue;
-      }
-      var filt = grid_options.api.getFilterInstance(field);
-      filt.filter = old_filt.filter;
-      filt.filterText = old_filt.filterText;
-    }
-    grid_options.api.onFilterChanged();
+    document.getElementById('content-loading').style.visibility = 'hidden';
   });
-  $('#query').attr('placeholder', q);
 }
 
 // https://stackoverflow.com/questions/7744912/making-a-javascript-string-sql-friendly
@@ -283,10 +367,24 @@ function mysql_real_escape_string (str) {
   });
 }
 
-function query(str, callback) {
-  var xhr = new XMLHttpRequest();
+function query(key, str, callback) {
+  var old = pending[key];
+  if (old) {
+    try {
+      old.aborted = true;
+    } catch(e) {}
 
-  var params = "add_http_cors_header=1&log_queries=1&output_format_json_quote_64bit_integers=1&output_format_json_quote_denormals=1&database=" + current_database + "&result_overflow_mode=throw"
+    try {
+      old.abort();
+    } catch (e) {
+      console.log(e);
+    }
+  }
+
+  var xhr = new XMLHttpRequest();
+  pending[key] = xhr;
+
+  var params = "add_http_cors_header=1&log_queries=1&output_format_json_quote_64bit_integers=1&database=" + (current_database || '') + "&result_overflow_mode=throw"
 
   xhr.open("POST", db_host + "/?" + params, true)
   xhr.onreadystatechange = function() {
@@ -294,23 +392,28 @@ function query(str, callback) {
         if (xhr.status === 200) {
           var res = JSON.parse(xhr.responseText);
           var fields = [];
-          resp_field_types = {};
+          var types = {};
           for (var i = 0; i < res.meta.length; i++) {
             var m = res.meta[i];
-            resp_field_types[m.name] = m.type;
+            types[m.name] = m.type;
             fields.push(m.name);
           }
           callback({
             fields: fields,
             rows: res.data,
+            types: types,
             time_ns: res.statistics.elapsed * 1e9,
             affected_rows: res.statistics.rows_read,
           });
+        } else if (!xhr.aborted) {
+          callback({err: 'got status ' + xhr.status + ', error text: ' + xhr.responseText})
         }
     }
   }
   xhr.onerror = function() {
-    callback({err: 'got status ' + xhr.status + ', error text: ' + xhr.responseText})
+    if (!xhr.aborted) {
+      callback({err: 'XMLHttpRequest error: got status ' + xhr.status + ', error text: ' + xhr.responseText})
+    }
   }
 
   str = str.replace(/\;\s*$/, '');
@@ -354,7 +457,7 @@ function drawCopyEl(el, value) {
 function selectDatabase(val, first) {
   current_database = val;
   localStorage.setItem('current_database', current_database);
-  query("SHOW TABLES FROM " + current_database, function(data) {
+  query('tables', "SHOW TABLES FROM " + current_database, function(data) {
     if (data.err) {
       alert(data.err);
       return;
@@ -365,12 +468,12 @@ function selectDatabase(val, first) {
     drawTables(global_tables, first);
 
     $('#info').html('');
-    $('#search').val('').focus();
+    $('#search').val('');
   });
 }
 
 function reloadDatabases() {
-  query("SHOW DATABASES", function(data) {
+  query('databases', "SHOW DATABASES", function(data) {
     if (data.err) {
       alert(data.err);
       return;
@@ -421,23 +524,43 @@ function drawTables(tables, first) {
     var name = $(this).data('name');
     current_table = name;
     localStorage.setItem('current_table', current_table);
+    window.location.hash = db_host; // reset filters from history if any
     var className = 'active';
     $('#tables').find('.' + className).removeClass(className);
     $(this.parentNode).addClass(className);
     
     var q = 'SELECT * FROM ' + current_database + "." + name + ' LIMIT 100';
 
-    query(q, function(data) {
-      drawResponse(data);
-      $('#filter-btn').attr('disabled', false);
+    document.getElementById('content-loading').style.visibility = '';
+    query('content', q, function(data) {
+      drawResponse(data, true);
+      document.getElementById('content-loading').style.visibility = 'hidden';
     });
-    $('#query').attr('placeholder', q);
 
-    query("SELECT\
+    query('structure', 'SHOW CREATE TABLE ' + current_database + '.' + current_table, function(data) {
+      if (data.err) {
+        console.log(data.err);
+        return;
+      }
+
+      if (!data.rows || !data.rows[0] || !data.rows[0][0]) {
+        console.log('not enough data', data);
+        return;
+      }
+
+      var str = data.rows[0][0];
+      str = str.replace(/\((.*)\)\s*ENGINE/, function(data, p1) {
+        return "(\n " + p1.replace(/\,/g, ",\n") + "\n) ENGINE";
+      })
+
+      $('#structure').html(htmlspecialchars(str));
+    })
+
+    query('table-info', "SELECT\
     any(engine), sum(rows), sum(bytes)  \
     FROM system.parts WHERE database = '" + current_database + "' AND table = '" + name + "'", function(data) {
       if (data.err) {
-        alert(data.err);
+        console.log(data.err);
         return;
       }
 

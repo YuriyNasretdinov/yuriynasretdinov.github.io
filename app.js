@@ -203,15 +203,40 @@ function drawResponse(data, is_content) {
     var f = {
       headerName: fields[i],
       field: fields[i],
+      maxWidth: 800,
     };
 
-    try {
-      if (data.types[fields[i]].indexOf('Int') >= 0) {
-        f.comparator = function (valueA, valueB, nodeA, nodeB, isInverted) {
-            return valueA - valueB;
-        };
+    var typ = data.types ? (data.types[fields[i]] || '') : '';
+
+    if (typ.indexOf('Int') >= 0) {
+      f.filter = 'agNumberColumnFilter';
+      f.filterParams = {
+        inRangeInclusive: true
       }
-    } catch (e) {}
+    } else if (typ.indexOf('Date') >= 0) {
+      f.filter = 'agDateColumnFilter';
+      f.filterParams = {
+        inRangeInclusive: true,
+        comparator: function (filterDate, value) {
+          // either "yyyy-mm-dd hh:ii:ss" or "yyyy-mm-dd"
+          var parts = value.split(" ")
+          var dt = parts[0].split('-')
+          if (parts.length == 1) {
+            var cellDate = new Date(dt[0], dt[1] - 1, dt[2]);
+          } else {
+            var ts = parts[1].split(':')
+            var cellDate = new Date(dt[0], dt[1] - 1, dt[2], ts[0], ts[1], ts[2]);
+          }
+          if (cellDate < filterDate) {
+              return -1;
+          } else if (cellDate > filterDate) {
+              return 1;
+          } else {
+              return 0;
+          }
+        }
+      }
+    }
 
     fullFields.push(f)
   }
@@ -244,53 +269,58 @@ function filtersEmpty() {
 function getFiltersWhere() {
   var defs = content_grid_options.columnDefs;
   var where = ['1=1'];
+  var model = content_grid_options.api.getFilterModel();
+  var operators_map = {
+    'equals': '=',
+    'notEqual': '<>',
+    'lessThanOrEqual': '<=',
+    'lessThan': '<',
+    'greaterThan': '>',
+    'greaterThanOrEqual': '>=',
+  };
 
-  for (var i = 0; i < defs.length; i++) {
-    var def = defs[i];
-    var field = def.field;
-    var filt = content_grid_options.api.getFilterInstance(field);
-    if (!filt.filterText) {
+  for (var field in model) {
+    var filt = model[field];
+    var typ = resp_field_types[field] || '';
+    var filter = filt.filterType == 'date' ? filt.dateFrom : filt.filter;
+    var filter_to = filt.filterType == 'date' ? filt.dateTo : filt.filterTo;
+    var esc_filter = mysql_real_escape_string(filter);
+    var esc_filter_to = mysql_real_escape_string(filter_to);
+    if (typ == 'DateTime') {
+      esc_filter += ' 00:00:00';
+      esc_filter_to += ' 23:59:59';
+    }
+    var op = operators_map[filt.type];
+    if (op) {
+      if (typ.indexOf('Int') < 0) {
+        where.push(field + op + "'" + esc_filter + "'");
+      } else {
+        where.push(field + op + parseInt(filter));
+      }
       continue;
     }
 
-    typ = resp_field_types[field] || '';
-    var esc_filter = mysql_real_escape_string(filt.filterText);
-
-    switch (filt.filter) {
+    switch (filt.type) {
       case "contains":
-        if (typ.indexOf('Int') < 0) {
-          where.push(field + " LIKE '%" + esc_filter + "%'");
-        }
+        where.push(field + " LIKE '%" + esc_filter + "%'");
         break;
       case "notContains":
-        if (typ.indexOf('Int') < 0) {
-          where.push(field + " NOT LIKE '%" + esc_filter + "%'");
-        }
+        where.push(field + " NOT LIKE '%" + esc_filter + "%'");
         break;
       case "startsWith":
-        if (typ.indexOf('Int') < 0) {
-          where.push(field + " LIKE '" + esc_filter + "%'");
-        }
+        where.push(field + " LIKE '" + esc_filter + "%'");
       case "endsWith":
+        where.push(field + " LIKE '%" + esc_filter + "'");
+      case "inRange":
         if (typ.indexOf('Int') < 0) {
-          where.push(field + " LIKE '%" + esc_filter + "'");
-        }
-      case "equals":
-        if (typ.indexOf('Int') < 0) {
-          where.push(field + "='" + esc_filter + "'");
+          where.push(field + " BETWEEN '" + esc_filter + "' AND '" + esc_filter_to + "'");
         } else {
-          where.push(field + "=" + parseInt(filt.filterText));
-        }
-        break;
-      case "notEqual":
-        if (typ.indexOf('Int') < 0) {
-          where.push(field + "<>'" + esc_filter + "'");
-        } else {
-          where.push(field + "<>" + parseInt(filt.filterText));
+          where.push(field + " BETWEEN " + parseInt(filter) + " AND " + parseInt(filter_to));
         }
         break;
       default:
-        console.log(field, "type=" + filt.filter, "text=" + filt.filterText);
+        console.log(filt);
+        break;
     }
   }
 
@@ -549,8 +579,10 @@ function drawTables(tables, first) {
       }
 
       var str = data.rows[0][0];
-      str = str.replace(/\((.*)\)\s*ENGINE/, function(data, p1) {
-        return "(\n " + p1.replace(/\,/g, ",\n") + "\n) ENGINE";
+      str = str.replace(/(CREATE.*?)\((.*?)\)\s*(ENGINE|AS)/, function(data, cr, p1, p2) {
+        return cr + "(\n " + p1.replace(/\,/g, ",\n") + "\n) " + p2;
+      }).replace(/ (SELECT|FROM|WHERE|ORDER BY|GROUP BY) /g, function(data, op) {
+        return "\n" + op + " ";
       })
 
       $('#structure').html(htmlspecialchars(str));

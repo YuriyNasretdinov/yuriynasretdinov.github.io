@@ -7,7 +7,7 @@
 	<script src="js/ace-min/ext-language_tools.js"></script>
 	<script type="text/javascript" src="jquery.js"></script>
 	<script type="text/javascript" src="js/bootstrap.js"></script>
-	<script type="text/javascript" src="app.js?v2"></script>
+	<script type="text/javascript" src="app.js?v3"></script>
 	<style type="text/css">
 	body {
 		overflow: hidden;
@@ -128,8 +128,11 @@
 				<b>Apply filters</b>
 			</button>
 			<button id="filter-btn" class="btn btn-mini btn-primary pull-right" onclick="applyFilters(true)" style="margin: 3px;">
-					<b>Apply filters &amp; sorting</b>
-				</button>
+				<b>Apply filters &amp; sorting</b>
+			</button>
+			<button class="btn btn-mini btn-info pull-right" onclick="content_grid_options.columnApi.autoSizeColumns(content_grid_options.columnApi.getAllColumns())" style="margin: 3px;">
+				<b>Auto-size</b>
+			</button>
 		</td></tr>
 		<tr><td>
 			<div id="content-query-result" class="ag-theme-fresh">
@@ -156,7 +159,9 @@
 				<button id="execute-btn" class="btn btn-mini btn-primary pull-right" onclick="submitQuery()" style="margin: 3px;">
 					<b>Execute</b>
 				</button>
-				
+				<button class="btn btn-mini btn-info pull-right" onclick="grid_options.columnApi.autoSizeColumns(grid_options.columnApi.getAllColumns())" style="margin: 3px;">
+					<b>Auto-size</b>
+				</button>
 			</div>
 		</td></tr>
 		<tr><td>

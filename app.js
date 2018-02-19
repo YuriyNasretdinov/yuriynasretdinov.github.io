@@ -14,20 +14,22 @@ var
   pending = {};
 
 $(function() {
+  window.onhashchange = function() {
+    var old_db_host = db_host;
+    parseHash();
+    if (old_db_host != db_host) {
+      window.location.reload();
+    }
+  }
+
   if (window.location.hash) {
-    var hash = window.location.hash;
-    if (hash.charAt(0) == '#') {
-      hash = hash.substring(1);
-    }
-    var hash_parts = hash.split(/\#/g, 4);
-    db_host = hash_parts[0];
-    if (hash_parts.length == 4) {
-      current_database = hash_parts[1];
-      current_table = hash_parts[2];
-      var external_where = decodeURIComponent(hash_parts[3]);
-    }
+    var external_where = parseHash();
   } else {
     db_host = prompt('Host:', 'http://127.0.0.1:8123/');
+    if (!db_host) {
+      alert('You must enter host name. The interface will not work without it. Reload page and try again.');
+      return;
+    }
     window.location.hash = db_host;
   }
 
@@ -87,6 +89,22 @@ $(function() {
     }
   }
 })
+
+function parseHash() {
+  var hash = window.location.hash;
+  if (hash.charAt(0) == '#') {
+    hash = hash.substring(1);
+  }
+  var hash_parts = hash.split(/\#/g, 4);
+  db_host = hash_parts[0];
+  if (hash_parts.length == 4) {
+    current_database = hash_parts[1];
+    current_table = hash_parts[2];
+    var external_where = decodeURIComponent(hash_parts[3]);
+  }
+
+  return external_where;
+}
 
 function registerAltKeys() {
   $(document.body).on('keydown', function(e) {
@@ -456,22 +474,29 @@ function query(key, str, callback) {
 }
 
 function drawCopyEl(el, value) {
+  var width = el.style.width;
   var off = $(el).offset();
+  if (off.left + parseInt(width) > window.innerWidth) {
+    off.left = window.innerWidth - parseInt(width);
+  }
+  if (off.left <= 0) {
+    off.left = 0;
+  }
+  if (parseInt(width) >= window.innerWidth + 30) {
+    width = (window.innerWidth - 30) + 'px';
+  }
   var el = document.createElement('textarea');
-  el.value = value;
   el.style.position = 'absolute';
   el.style.top = off.top + 'px';
   el.style.left = off.left + 'px';
+  el.style.width = width;
   el.style.zIndex = '10000';
   document.body.appendChild(el);
   el.focus();
-
+  el.value = value;
   $(el).height(0);
-  var height = Math.max(20, Math.min(el.scrollHeight, 500));
+  var height = Math.max(20, Math.min(el.scrollHeight, 70));
   $(el).height(height);
-  if (height > 100) {
-    el.style.top = (off.top - height + 100) + 'px';
-  }
 
   el.onblur = function() {
     document.body.removeChild(el);

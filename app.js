@@ -44,11 +44,11 @@ $(function() {
 
   $('#search').bind({keyup: filterTables, mouseup: filterTables});
 
-  var last_q = localStorage.getItem('last_query');
+  var last_q = localGetKey('last_query');
   
   var langTools = ace.require("ace/ext/language_tools");
   editor = ace.edit("query");
-  editor.session.setMode("ace/mode/mysql");
+  editor.session.setMode("ace/mode/clickhouse"); // imported from tabix
   editor.setOptions({
     enableBasicAutocompletion: true,
     enableSnippets: true,
@@ -57,6 +57,55 @@ $(function() {
   if (last_q) {
     editor.setValue(last_q, 1);
   }
+
+  var wpoffset = 0;
+
+  $('#smyles_dragbar').mousedown(function (e) {
+    e.preventDefault();
+    window.dragging = true;
+
+    var smyles_editor = $('#query');
+    var top_offset = smyles_editor.offset().top - wpoffset;
+
+    // Set editor opacity to 0 to make transparent so our wrapper div shows
+    smyles_editor.css('opacity', 0);
+
+    // handle mouse movement
+    $(document).mousemove(function (e) {
+      var actualY = e.pageY - wpoffset;
+      // editor height
+      var eheight = actualY - top_offset;
+      // Set wrapper height
+      $('#smyles_editor_wrap').css('height', eheight);
+      // Set dragbar opacity while dragging (set to 0 to not show)
+      $('#smyles_dragbar').css('opacity', 0.15);
+    });
+
+  });
+
+  $(document).mouseup(function (e) {
+
+    if (window.dragging) {
+      var smyles_editor = $('#query');
+
+      var actualY = e.pageY - wpoffset;
+      var top_offset = smyles_editor.offset().top - wpoffset;
+      var eheight = actualY - top_offset;
+
+      $(document).unbind('mousemove');
+
+      // Set dragbar opacity back to 1
+      $('#smyles_dragbar').css('opacity', 1);
+
+      // Set height on actual editor element, and opacity back to 1
+      smyles_editor.css('height', eheight).css('opacity', 1);
+
+      // Trigger ace editor resize()
+      editor.resize();
+      window.dragging = false;
+    }
+
+  });
 
   $('#query-result,#content-query-result').on('dblclick', function(e) {
     var targ = e.target;
@@ -79,16 +128,32 @@ $(function() {
     query('content', filter_q, function(data) {
       drawResponse(data, true);
       document.getElementById('content-loading').style.visibility = 'hidden';
-      $('#content-params').html(htmlspecialchars(filter_q));
+      setContentParams(filter_q);
       $('#content-params').show();
     });
   } else {
-    var section = localStorage.getItem('default_section');
+    var section = localGetKey('default_section');
     if (section) {
       selectSection(section);
     }
   }
 })
+
+function setContentParams(query) {
+  $('#content-params').attr('value', query);
+}
+
+function addFilter(el) {
+  var par = el.parentNode;
+  var clon = $(par).clone();
+  clon.find('.btn-danger').attr('disabled', false);
+  clon.appendTo(par.parentNode);
+}
+
+function delFilter(el) {
+  var par = el.parentNode;
+  par.parentNode.removeChild(par);
+}
 
 function parseHash() {
   var hash = window.location.hash;
@@ -128,12 +193,30 @@ function registerAltKeys() {
   });
 }
 
+function localGetKey(key) {
+  try {
+    return localStorage.getItem(key);
+  } catch (e) {
+    console.log(e);    
+  }
+
+  return '';
+}
+
+function localSetKey(key, value) {
+  try {
+    localStorage.setItem(key, value);
+  } catch (e) {
+    console.log(e);    
+  }
+}
+
 function submitQuery() {
   $('#content-params').hide();
   document.getElementById('executing').style.visibility = '';
 
   var q = editor.getValue();
-  localStorage.setItem('last_query', q);
+  localSetKey('last_query', q);
   query('user', editor.getSelectedText() || q, function(data) {
     document.getElementById('executing').style.visibility = 'hidden';
     drawResponse(data);
@@ -163,22 +246,24 @@ function selectSection(name) {
       break;
   }
 
-  localStorage.setItem('default_section', name);
+  localSetKey('default_section', name);
   return false;
 }
 
 function saveLastQuery() {
   try {
-    localStorage.setItem('last_query', editor.getValue());
+    localSetKey('last_query', editor.getValue());
   } catch (e) {}
 }
 
-function drawResponse(data, is_content) {
+function drawResponse(data, is_content, save_filters) {
   var id_prefix = '#' + (is_content ? 'content-' : '');
 
+  document.querySelector(id_prefix + 'query-result').innerHTML = '';
+
   $(id_prefix + 'params').hide();
-  $(id_prefix + 'query-ms').html(Math.floor(data['time_ns'] / 1000000))
-  $(id_prefix + 'affected-rows').html(humanRowsCount(data['affected_rows']))
+  $(id_prefix + 'query-ms').html(Math.floor((data['time_ns'] || 0) / 1000000))
+  $(id_prefix + 'affected-rows').html(humanRowsCount(data['affected_rows'] || 0))
   $(id_prefix + 'result-rows').html(data.rows && data.rows.length)
 
   var grid_key = is_content ? 'content_grid' : 'grid';
@@ -191,9 +276,10 @@ function drawResponse(data, is_content) {
     window[grid_key] = null;
   }
 
-  document.querySelector(id_prefix + 'query-result').innerHTML = '';
-
-  if (data.err) {
+  if (data.all_ok) {
+    $(id_prefix + 'query-result').html('Query executed successfully');
+    return;
+  } else if (data.err) {
     $(id_prefix + 'query-result').html('<b>Error:</b> ' + data.err);
     return;
   }
@@ -217,6 +303,7 @@ function drawResponse(data, is_content) {
     fullRows.push(rowAssoc);
   }
 
+  field_types = {};
   for (var i = 0; i < fields.length; i++) {
     var f = {
       headerName: fields[i],
@@ -224,17 +311,12 @@ function drawResponse(data, is_content) {
       maxWidth: 800,
     };
 
-    var typ = data.types ? (data.types[fields[i]] || '') : '';
+    var field = fields[i];
+    var typ = data.types ? (data.types[field] || '') : '';;
+    field_types[field] = typ;
 
-    if (typ.indexOf('Int') >= 0) {
-      f.filter = 'agNumberColumnFilter';
+    if (typ.indexOf('Date') >= 0) {
       f.filterParams = {
-        inRangeInclusive: true
-      }
-    } else if (typ.indexOf('Date') >= 0) {
-      f.filter = 'agDateColumnFilter';
-      f.filterParams = {
-        inRangeInclusive: true,
         comparator: function (filterDate, value) {
           // either "yyyy-mm-dd hh:ii:ss" or "yyyy-mm-dd"
           var parts = value.split(" ")
@@ -252,108 +334,101 @@ function drawResponse(data, is_content) {
           } else {
               return 0;
           }
-        }
+        }        
       }
     }
 
     fullFields.push(f)
   }
 
+  if (is_content && !save_filters) {
+    setUpFilters(fields);
+  }
+
   window[grid_options_key] = {
     columnDefs: fullFields,
     rowData: fullRows,
     enableColResize: true,
-    singleClickEdit: true,
-    enableFilter: true,
     enableSorting: true,
+    singleClickEdit: true
   };
   var query_res_el = document.querySelector(id_prefix + 'query-result')
   window[grid_key] = new agGrid.Grid(query_res_el, window[grid_options_key]);
 }
 
-function filtersEmpty() {
-  var defs = content_grid_options.columnDefs;
-  for (var i = 0; i < defs.length; i++) {
-    var def = defs[i];
-    var field = def.field;
-    var filt = content_grid_options.api.getFilterInstance(field);
-    if (filt.filterText) {
-      return false;
-    }
+var field_types = {};
+
+function changeFilterType(el) {
+  var $par = $(el.parentNode);
+  var typ = field_types[el.value];
+  if (!typ) {
+    return;
   }
-  return true;
+
+  var attr_type = 'text';
+
+  if (typ.indexOf('Int') >= 0) {
+    attr_type = 'number';
+  } else if (typ.indexOf('Date') >= 0) {
+    attr_type = 'date';
+  }
+
+  $par.find('.filter_value').attr('type', attr_type);
+}
+
+function setUpFilters(fields) {
+  var inner = ['<div class="filter">\
+  <select name="field" class="content-field select-mini" onchange="changeFilterType(this)"><option value="">Select field...</option>'];
+
+  for (var i = 0; i < fields.length; i++) {
+    inner.push('<option name="' + htmlspecialchars(fields[i]) + '">' + htmlspecialchars(fields[i]) + '</option>');
+  }
+
+  inner.push('</select>\
+  <select name="operator" class="content-operator select-mini">\
+    <option value="=">=</option>\
+    <option value="&lt;&gt;">&lt;&gt;</option>\
+    <option value="&gt;">&gt;</option>\
+    <option value="&gt;=">&gt;=</option>\
+    <option value="&lt;">&lt;</option>\
+    <option value="&lt;=">&lt;=</option>\
+    <option value="LIKE">LIKE</option>\
+    <option value="NOT LIKE">NOT LIKE</option>\
+  </select>\
+  <input type="text" class="input-mini filter_value" style="width: 200px;" value="" />\
+  <button class="btn btn-danger btn-mini pull-right" style="margin-left: 5px;" onclick="delFilter(this)" disabled><b>-</b></button>\
+  <button class="btn btn-success btn-mini pull-right" style="margin-left: 5px;" onclick="addFilter(this)"><b>+</b></button>\
+</div>');
+
+  document.getElementById('content-filters').innerHTML = inner.join('');
 }
 
 function getFiltersWhere() {
-  var defs = content_grid_options.columnDefs;
-  var where = ['1=1'];
-  var model = content_grid_options.api.getFilterModel();
-  var operators_map = {
-    'equals': '=',
-    'notEqual': '<>',
-    'lessThanOrEqual': '<=',
-    'lessThan': '<',
-    'greaterThan': '>',
-    'greaterThanOrEqual': '>=',
-  };
+  var elements = document.getElementById('content-filters').getElementsByClassName('filter');
+  var filters = ['1=1'];
 
-  for (var field in model) {
-    var filt = model[field];
-    var typ = resp_field_types[field] || '';
-    var filter = filt.filterType == 'date' ? filt.dateFrom : filt.filter;
-    var filter_to = filt.filterType == 'date' ? filt.dateTo : filt.filterTo;
-    var esc_filter = mysql_real_escape_string(filter);
-    var esc_filter_to = mysql_real_escape_string(filter_to);
-    if (typ == 'DateTime') {
-      esc_filter += ' 00:00:00';
-      esc_filter_to += ' 23:59:59';
-    }
-    var op = operators_map[filt.type];
-    if (op) {
-      if (typ.indexOf('Int') < 0) {
-        where.push(field + op + "'" + esc_filter + "'");
-      } else {
-        where.push(field + op + parseInt(filter));
-      }
+  for (var i = 0; i < elements.length; i++) {
+    var el = elements[i];
+    var field = el.getElementsByClassName('content-field')[0].value;
+    var typ = field_types[field];
+    var op = el.getElementsByClassName('content-operator')[0].value;
+    var value = el.getElementsByClassName('filter_value')[0].value;
+    if (!field) {
       continue;
     }
-
-    switch (filt.type) {
-      case "contains":
-        where.push(field + " LIKE '%" + esc_filter + "%'");
-        break;
-      case "notContains":
-        where.push(field + " NOT LIKE '%" + esc_filter + "%'");
-        break;
-      case "startsWith":
-        where.push(field + " LIKE '" + esc_filter + "%'");
-      case "endsWith":
-        where.push(field + " LIKE '%" + esc_filter + "'");
-      case "inRange":
-        if (typ.indexOf('Int') < 0) {
-          where.push(field + " BETWEEN '" + esc_filter + "' AND '" + esc_filter_to + "'");
-        } else {
-          where.push(field + " BETWEEN " + parseInt(filter) + " AND " + parseInt(filter_to));
-        }
-        break;
-      default:
-        console.log(filt);
-        break;
+    
+    if (typ.indexOf('Int') > 0) {
+      filters.push(field + ' ' + op + ' ' + parseInt(value));
+    } else {
+      filters.push(field + ' ' + op + " '" + mysql_real_escape_string(value) + "'");
     }
   }
-
-  if (where.length > 1) {
-    where = where.slice(1);
-  }
-
-  return where;
+  return filters;
 }
 
 function applyFilters(with_sort) {
-  var filter_model = content_grid_options.api.getFilterModel();
   var where = getFiltersWhere();
   var where_part = where.join(' AND ');
-
   var sort_model = content_grid_options.api.getSortModel();
   if (with_sort) {
     var sort_parts = [];
@@ -364,24 +439,22 @@ function applyFilters(with_sort) {
     if (sort_parts.length > 0) {
       where_part += ' ORDER BY ' + sort_parts.join(', ');
     }
-  }
+  }  
 
   window.location.hash = db_host + '#' + current_database + '#' + current_table + '#' + encodeURIComponent(where_part);
-  var q = 'SELECT * FROM ' + current_database + "." + current_table +
+  var q = 'SELECT * FROM ' + current_database + '.' + current_table +
     ' WHERE ' + where_part +
     ' LIMIT 1000';
 
   document.getElementById('content-loading').style.visibility = '';
-  $('#content-params').html(htmlspecialchars(q));
+  setContentParams(q);
   $('#content-params').show();
 
   query('content', q, function(data) {
-    drawResponse(data, true);
+    drawResponse(data, true, true);
 
     $('#content-params').show();
-    content_grid_options.api.setFilterModel(filter_model);
     content_grid_options.api.setSortModel(sort_model);
-
     document.getElementById('content-loading').style.visibility = 'hidden';
   });
 }
@@ -434,25 +507,53 @@ function query(key, str, callback) {
 
   var params = "add_http_cors_header=1&log_queries=1&output_format_json_quote_64bit_integers=1&database=" + (current_database || '') + "&result_overflow_mode=throw"
 
+  var isCreate = (str.indexOf('create table') >= 0 || str.indexOf('CREATE TABLE') >= 0) && str.indexOf('SHOW CREATE TABLE') < 0;
+  var isDrop = str.indexOf('DROP TABLE') >= 0 || str.indexOf('drop table') >= 0;
+  var isInsert = str.indexOf('INSERT INTO') >= 0 || str.indexOf('insert into') >= 0;
+  var isSelect = str.indexOf('SELECT') >= 0 || str.indexOf('select') >= 0;
+
   xhr.open("POST", db_host + "/?" + params, true)
   xhr.onreadystatechange = function() {
     if (xhr.readyState === XMLHttpRequest.DONE) {
         if (xhr.status === 200) {
-          var res = JSON.parse(xhr.responseText);
+          var res;
+          if (xhr.responseText == '') {
+            res = {data: {all_ok: true}};
+          } else {
+            try {
+              res = JSON.parse(xhr.responseText);
+            } catch (e) {
+              res = {data: {err: e}};
+            }
+          }
+          
           var fields = [];
           var types = {};
-          for (var i = 0; i < res.meta.length; i++) {
-            var m = res.meta[i];
-            types[m.name] = m.type;
-            fields.push(m.name);
+          var statistics = res.statistics || {};
+
+          if (res.meta) {
+            for (var i = 0; i < res.meta.length; i++) {
+              var m = res.meta[i];
+              types[m.name] = m.type;
+              fields.push(m.name);
+            }
           }
+
           callback({
             fields: fields,
             rows: res.data,
             types: types,
-            time_ns: res.statistics.elapsed * 1e9,
-            affected_rows: res.statistics.rows_read,
+            time_ns: statistics.elapsed * 1e9,
+            affected_rows: statistics.rows_read,
           });
+
+          if (isCreate || isDrop) {
+            setTimeout(function() {
+              selectDatabase(current_database, false);
+            }, 0);
+          } else if (isInsert) {
+
+          }
         } else if (!xhr.aborted) {
           callback({err: 'got status ' + xhr.status + ', error text: ' + xhr.responseText})
         }
@@ -466,11 +567,15 @@ function query(key, str, callback) {
 
   str = str.replace(/\;\s*$/, '');
 
-  if ((str.indexOf('SELECT') >= 0 || str.indexOf('select') >= 0) && str.indexOf('limit') < 0 && str.indexOf('LIMIT') < 0) {
+  if (isSelect && str.indexOf('limit') < 0 && str.indexOf('LIMIT') < 0) {
     str += "\nLIMIT 1000";
   }
 
-  xhr.send(str + "\nFORMAT JSONCompact");
+  if (isSelect && !isInsert || !isCreate && !isDrop && !isInsert) {
+    str += "\nFORMAT JSONCompact";
+  }
+
+  xhr.send(str);
 }
 
 function drawCopyEl(el, value) {
@@ -511,7 +616,7 @@ function drawCopyEl(el, value) {
 
 function selectDatabase(val, first) {
   current_database = val;
-  localStorage.setItem('current_database', current_database);
+  localSetKey('current_database', current_database);
   query('tables', "SHOW TABLES FROM " + current_database, function(data) {
     if (data.err) {
       alert(data.err);
@@ -538,7 +643,7 @@ function reloadDatabases() {
     if (current_database) {
       default_database = current_database;
     } else {
-      var saved_database = localStorage.getItem("current_database");
+      var saved_database = localGetKey("current_database");
       if (saved_database) {
         default_database = saved_database;
       }
@@ -578,7 +683,7 @@ function drawTables(tables, first) {
   $('#tables').html(result.join("\n")).find('.table_name').bind('click', function() {
     var name = $(this).data('name');
     current_table = name;
-    localStorage.setItem('current_table', current_table);
+    localSetKey('current_table', current_table);
     window.location.hash = db_host; // reset filters from history if any
     var className = 'active';
     $('#tables').find('.' + className).removeClass(className);
@@ -644,7 +749,7 @@ function drawTables(tables, first) {
 }
 
 function selectDefaultTable() {
-  var default_table = localStorage.getItem('current_table');
+  var default_table = localGetKey('current_table');
   if (!default_table) return;
   $('#tables').find('.table_name[data-name="' + default_table + '"]').trigger('click');
 }

@@ -4,6 +4,8 @@
 	<link href="css/bootstrap.css" rel="stylesheet" media="screen">
 	<script src="js/ag-grid.min.js"></script>
 	<script src="js/ace-min/ace.js"></script>
+	<script src="js/ace-min/clickhouse_highlight_rules.js"></script>
+	<script src="js/ace-min/ch_completions_help.js"></script>
 	<script src="js/ace-min/ext-language_tools.js"></script>
 	<script type="text/javascript" src="jquery.js"></script>
 	<script type="text/javascript" src="js/bootstrap.js"></script>
@@ -84,6 +86,29 @@
 	.full {
 		height: calc(100vh - 50px);
 	}
+
+	.select-mini {
+		font-size: 11px;
+		height: 20px;
+		width: 100px;
+	}
+
+	#smyles_editor {
+		height: 300px;
+	}
+
+	#smyles_editor_wrap {
+		background-color: #eceaea;
+		border-bottom: 1px solid #888888;
+	}
+
+	#smyles_dragbar {
+		background-color: #888888;
+		width: 100%;
+		height: 2px;
+		cursor: row-resize;
+		opacity: 1;
+	}
 	</style>
 </head>
 <body onbeforeunload="saveLastQuery()">
@@ -127,14 +152,17 @@
 	</div>
 
 	<table class="full" id="content-query-view">
-		<tr height="40"><td>
-			<span id="content-loading" style="visibility: hidden;">loading...</span>
-			<span id="content-params" style="display: none;"></span>
+		<tr height="30"><td>
+			<span id="content-loading" style="visibility: hidden;" class="pull-left"><img src="img/loading.svg" width="30" height="30" /></span>
+			<div class="filters pull-left" style="margin-top: 5px;" id="content-filters">
+
+			</div>
+			
 			<button id="filter-btn" class="btn btn-mini btn-primary pull-right" onclick="applyFilters()" style="margin: 3px;">
-				<b>Apply filters</b>
+				<b>Filter</b>
 			</button>
 			<button id="filter-btn" class="btn btn-mini btn-primary pull-right" onclick="applyFilters(true)" style="margin: 3px;">
-				<b>Apply filters &amp; sorting</b>
+				<b>Filter &amp; sort</b>
 			</button>
 			<button class="btn btn-mini btn-info pull-right" onclick="content_grid_options.columnApi.autoSizeColumns(content_grid_options.columnApi.getAllColumns())" style="margin: 3px;">
 				<b>Auto-size</b>
@@ -142,6 +170,7 @@
 			<button class="btn btn-mini btn-info pull-right" onclick="content_grid_options.api.exportDataAsCsv({});" style="margin: 3px;">
 				<b>CSV</b>
 			</button>
+			<input id="content-params" class="pull-right" style="display: none; margin: 7px;" type="text" readonly style="max-width: 250px;" />
 		</td></tr>
 		<tr><td>
 			<div id="content-query-result" class="ag-theme-fresh">
@@ -159,11 +188,12 @@
 
 	<table class="full" style="display: none;" id="query-view">
 		<tr height="95"><td>
-			<div>
-				<div style="margin-bottom: 5px; height: 250px; width: 100%;" id="query"></div>
+			<div id="smyles_editor_wrap" style="margin-bottom: 0px;">
+				<div style="height: 250px; width: 100%; resize: height;" id="query"></div>
 			</div>
+			<div id="smyles_dragbar"></div>
 			<div>
-				<span id="executing" style="visibility: hidden;">executing...</span>
+				<span id="executing" style="visibility: hidden;"><img src="img/loading.svg" width="30" height="30" /></span>
 				<span id="params" style="display: none;"></span>
 				<button id="execute-btn" class="btn btn-mini btn-primary pull-right" onclick="submitQuery()" style="margin: 3px;">
 					<b>Execute</b>

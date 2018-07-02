@@ -417,7 +417,7 @@ function getFiltersWhere() {
       continue;
     }
     
-    if (typ.indexOf('Int') > 0) {
+    if (typ.indexOf('Int') >= 0) {
       filters.push(field + ' ' + op + ' ' + parseInt(value));
     } else {
       filters.push(field + ' ' + op + " '" + mysql_real_escape_string(value) + "'");

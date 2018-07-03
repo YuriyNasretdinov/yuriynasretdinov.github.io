@@ -395,7 +395,7 @@ function setUpFilters(fields) {
     <option value="LIKE">LIKE</option>\
     <option value="NOT LIKE">NOT LIKE</option>\
   </select>\
-  <input type="text" class="input-mini filter_value" style="width: 200px;" value="" />\
+  <input type="text" class="input-mini filter_value" style="width: 200px;" value="" onkeydown="if (event.keyCode == 13) { applyFilters(true); return false; }" />\
   <button class="btn btn-danger btn-mini pull-right" style="margin-left: 5px;" onclick="delFilter(this)" disabled><b>-</b></button>\
   <button class="btn btn-success btn-mini pull-right" style="margin-left: 5px;" onclick="addFilter(this)"><b>+</b></button>\
 </div>');

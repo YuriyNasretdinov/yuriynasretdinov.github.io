@@ -9,7 +9,7 @@
 	<script src="js/ace-min/ext-language_tools.js"></script>
 	<script type="text/javascript" src="jquery.js"></script>
 	<script type="text/javascript" src="js/bootstrap.js"></script>
-	<script type="text/javascript" src="app.js?v5"></script>
+	<script type="text/javascript" src="app.js?v6"></script>
 	<style type="text/css">
 	body {
 		overflow: hidden;
@@ -48,7 +48,8 @@
 
 	#tables {
 		width: 200px;
-		overflow: auto;
+		overflow: scroll;
+		font-size: 0.85em;
 	}
 
 	#database {
@@ -73,6 +74,7 @@
 
 	#info {
 		padding-left: 10px;
+		font-size: 0.85em;
 	}
 
 	#search {
@@ -108,6 +110,21 @@
 		height: 2px;
 		cursor: row-resize;
 		opacity: 1;
+	}
+
+	#tables > .nav > li > a {
+		display: inline-block !important;
+		min-width: 155px;
+	}
+
+	.btn-circle {
+		width: 20px;
+		height: 20px;
+		text-align: center;
+		padding: 4px 0;
+		font-size: 12px;
+		line-height: 0.9;
+		border-radius: 10px;
 	}
 	</style>
 </head>

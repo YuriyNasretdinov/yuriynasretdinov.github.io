@@ -146,7 +146,7 @@ function setContentParams(query) {
 function addFilter(el) {
   var par = el.parentNode;
   var clon = $(par).clone();
-  clon.find('.btn-danger').attr('disabled', false);
+  clon.find('[data-btn="delete"]').attr('disabled', false);
   clon.appendTo(par.parentNode);
 }
 
@@ -303,7 +303,9 @@ function drawResponse(data, is_content, save_filters) {
     fullRows.push(rowAssoc);
   }
 
-  field_types = {};
+  if (is_content) {
+    field_types = {};
+  }
   for (var i = 0; i < fields.length; i++) {
     var f = {
       headerName: fields[i],
@@ -313,7 +315,9 @@ function drawResponse(data, is_content, save_filters) {
 
     var field = fields[i];
     var typ = data.types ? (data.types[field] || '') : '';;
-    field_types[field] = typ;
+    if (is_content) {
+      field_types[field] = typ;
+    }
 
     if (typ.indexOf('Date') >= 0) {
       f.filterParams = {
@@ -396,8 +400,8 @@ function setUpFilters(fields) {
     <option value="NOT LIKE">NOT LIKE</option>\
   </select>\
   <input type="text" class="input-mini filter_value" style="width: 200px;" value="" onkeydown="if (event.keyCode == 13) { applyFilters(true); return false; }" />\
-  <button class="btn btn-danger btn-mini pull-right" style="margin-left: 5px;" onclick="delFilter(this)" disabled><b>-</b></button>\
-  <button class="btn btn-success btn-mini pull-right" style="margin-left: 5px;" onclick="addFilter(this)"><b>+</b></button>\
+  <button class="btn btn-circle btn-mini pull-right" style="margin-left: 5px;" onclick="delFilter(this)" data-btn="delete" disabled><b>&ndash;</b></button>\
+  <button class="btn btn-circle btn-mini pull-right" style="margin-left: 5px;" onclick="addFilter(this)"><b>+</b></button>\
 </div>');
 
   document.getElementById('content-filters').innerHTML = inner.join('');
@@ -677,7 +681,7 @@ function drawTables(tables, first) {
   var result = ['<ul class="nav nav-list"><li class="nav-header">Tables</li>'];
   for (var i = 0; i < tables.length; i++) {
     var name = htmlspecialchars(tables[i]);
-    result.push('<li><a href="#" class="table_name" data-name="' + name + '"><i class="icon-th"></i>' + name + '</a></li>')
+    result.push('<li><a href="#" class="table_name" data-name="' + name + '" title="' + name + '"><i class="icon-th"></i>' + name + '</a></li>')
   }
   result.push('</ul>');
   $('#tables').html(result.join("\n")).find('.table_name').bind('click', function() {
@@ -710,8 +714,11 @@ function drawTables(tables, first) {
 
       var str = data.rows[0][0];
       str = str.replace(/(CREATE.*?)\((.*?)\)\s*(ENGINE|AS)/, function(data, cr, p1, p2) {
-        return cr + "(\n " + p1.replace(/\,/g, ",\n") + "\n) " + p2;
-      }).replace(/ (SELECT|FROM|WHERE|ORDER BY|GROUP BY) /g, function(data, op) {
+        return cr + "(\n " + p1.replace(/\,/g, ",\n").replace(/\((.*?),\n(.*?)\)/g, function(dt, pp1, pp2) {
+          // Format things like 'AggregateFunction(sum, Int64)' properly
+          return '(' + pp1 + ',' + pp2 + ')';
+        }) + "\n) " + (p2 === 'ENGINE' ? "\n" : '') + p2;
+      }).replace(/ (SELECT|FROM|WHERE|ORDER BY|GROUP BY|PARTITION BY|SETTINGS) /g, function(data, op) {
         return "\n" + op + " ";
       })
 

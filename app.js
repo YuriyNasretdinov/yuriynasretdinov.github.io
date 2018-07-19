@@ -511,6 +511,10 @@ function query(key, str, callback) {
 
   var params = "add_http_cors_header=1&log_queries=1&output_format_json_quote_64bit_integers=1&database=" + (current_database || '') + "&result_overflow_mode=throw"
 
+  if (!window.i_am_mature_developer_and_i_am_responsible_for_my_own_mistakes) {
+    params += "&readonly=1"
+  }
+
   var isCreate = (str.indexOf('create table') >= 0 || str.indexOf('CREATE TABLE') >= 0) && str.indexOf('SHOW CREATE TABLE') < 0;
   var isDrop = str.indexOf('DROP TABLE') >= 0 || str.indexOf('drop table') >= 0;
   var isInsert = str.indexOf('INSERT INTO') >= 0 || str.indexOf('insert into') >= 0;

@@ -310,7 +310,7 @@ function drawResponse(data, is_content, save_filters) {
     var f = {
       headerName: fields[i],
       field: fields[i],
-      maxWidth: 800,
+      maxWidth: window.innerWidth - 300,
     };
 
     var field = fields[i];

@@ -9,10 +9,10 @@ You can do the following using LightHouse:
 
 1. See tables list, filter it
 2. See table size on disk and estimated number of rows
-3. See table content with filters and sorting
+3. See table contents with filters and sorting
 4. Execute read-only queries in SQL editor
 
-That's it!
+That's it! It is not meant to be a full-fledged replacement for tabix, for example.
 
 # License
 
